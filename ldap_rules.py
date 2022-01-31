@@ -64,7 +64,7 @@ class LdapRules:
         self.ldap_bind_dn = config.bind_dn
         self.ldap_bind_password = config.bind_password
         self.ldap_filter = config.filter
-        self.inviter = config.inviter  # TODO: Put in on_register and check per room?
+        self.inviter = config.inviter
         self.room_mapping = config.room_mapping
 
         # module-callback for Synapse
@@ -97,6 +97,12 @@ class LdapRules:
             inviter=config["inviter"],
             room_mapping=config["room_mapping"],
         )
+
+        # Make invite key optional
+        for group, mapping in ldap_config.room_mapping.items():
+            if "invite" not in ldap_config.room_mapping[group]:
+                # TODO: Check this per room, not per group?
+                mapping["invite"] = False
 
         return ldap_config
 
@@ -140,9 +146,6 @@ class LdapRules:
             )
             logger.debug(
                 "Established LDAP connection in simple bind mode: %s", conn)
-
-            # FIXME: Fails somewhere after this
-            # Port it to ldap_test2.py for debugging
 
             if self.ldap_start_tls:
                 await threads.deferToThread(conn.open)
@@ -188,9 +191,11 @@ class LdapRules:
             if username was not found in group or bind failed
         """
         try:
-            server = self._get_server
-            filter = self.ldap_filter.format(
-                username=username, group=ldap_group)
+            server = self._get_server()
+            query = self.ldap_filter.format(
+                username=username,
+                group=ldap_group
+            )
 
             result, conn = await self._ldap_simple_bind(
                 server=server,
@@ -204,7 +209,7 @@ class LdapRules:
             await threads.deferToThread(
                 conn.search,
                 search_base=ldap_base,
-                search_filter=filter,
+                search_filter=query,
             )
 
             responses = [
@@ -229,7 +234,7 @@ class LdapRules:
                     logger.info(
                         "LDAP search returned too many (%s) results for '%s'",
                         len(responses),
-                        filter,
+                        query,
                     )
 
                 await threads.deferToThread(conn.unbind)
@@ -240,12 +245,13 @@ class LdapRules:
             raise
 
     async def _join_to_room(
-        self, mxid: str, roomid: str, invite: Optional[bool] = False
+        self, sender:str, target: str, roomid: str, invite: Optional[bool] = False
     ) -> bool:
         """Tries to force-join a user into a room.
 
         Args:
-            mxid: Invitees mxid
+            sender: Inviters mxid, must be local user
+            target: Invitees mxid
             roomid: The roomid to join. Probably works for room alias?
             invite: If True, invites user as inviter instead
 
@@ -254,48 +260,55 @@ class LdapRules:
         Returns False
             if join or invite failed
         """
-        membership_event = "join"
         joined = True
-        # If set, invite as inviter instead
-        if invite:
-            membership_event = "invite"
+        # FIXME: Spec says that invite state must come before join state
+        # Thus always invite before join
 
         try:
-            await threads.deferToThread(
-                self.api_handler.update_room_membership,
-                self.inviter,
-                mxid,
+            # If membership_event == "join" then inviter == target must be True
+            await self.api_handler.update_room_membership(
+                sender,
+                target,
                 roomid,
-                membership_event,
+                "invite"
             )
-        except RuntimeError:
-            logger.info("Inviter '%s' is not a local user", self.inviter)
+            if not invite:
+                await self.api_handler.update_room_membership(
+                    target,
+                    target,
+                    roomid,
+                    "join"
+                )
+        except RuntimeError as e:
+            logger.info("Inviter '%s' not a local user?\n", sender, e)
             joined = False
         except ShadowBanError:
-            logger.info("Inviter '%s' is shadowbanned", self.inviter)
+            logger.info("Inviter '%s' is shadowbanned", sender)
             joined = False
         except SynapseError as e:
             logger.exception(
                 "Error occured when trying to join '%s' into '%s': %s",
-                mxid,
+                target,
                 roomid,
                 e
             )
             joined = False
 
         if joined:
-            logger.info("Joined user '%s' into room '%s'", mxid, roomid)
+            logger.info("Joined user '%s' into room '%s'", target, roomid)
         return joined
 
     async def on_register(self, username: str):
-        # username will be fully qualified
-        mxid = username
-        localpart = mxid.split(":", 1)[0][1:]
+        # username will be fully qualified from callback
+        localpart = username.split(":", 1)[0][1:]
         logging.debug("'%s' just got registered, localpart '%s'",
-                      mxid, localpart)
+                      username, localpart)
 
         for group, mapping in self.room_mapping.items():
             base = mapping["base"]
+            invite = mapping["invite"]
+            roomids = mapping["roomids"]
+
             logging.debug(
                 "Entering room_mapping for group '%s', base '%s' and "
                 "check whether '%s' exists in group",
@@ -309,18 +322,13 @@ class LdapRules:
                     "User '%s' found in group '%s', rooms to join: %s",
                     localpart,
                     group,
-                    roomid,
+                    roomids,
                 )
+
                 # ... on success we can iterate through rooms to join
-                for roomid in mapping["roomids"]:
-                    # Disable invitations by default
-                    # TODO: Check this per room, not per group?
-                    if "invite" in group:
-                        invite = group["invite"]
-                    else:
-                        invite = False
+                for roomid in roomids:
                     # Finally join or invite user to room
-                    await self._join_to_room(mxid, roomid, invite)
+                    await self._join_to_room(self.inviter, username, roomid, invite)
 
 
 def _require_keys(config: Dict[str, Any], required: Iterable[str]) -> None:

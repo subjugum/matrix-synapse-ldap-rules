@@ -39,7 +39,7 @@ modules:
       uri:
         - "ldaps://ldap.example.com:636"
       start_tls: false
-      bind_dn: "uid=matrix-reader,ou=local,dc=example,dc=com"
+      bind_dn: "uid=matrix,ou=local,dc=example,dc=com"
       bind_password: "bind_pw"
       filter: "(&(cn={group})(memberUid={username}))"
       inviter: "@admin:example.com"
@@ -57,6 +57,7 @@ modules:
           base: "ou=ads-old,ou=groups,dc=example,dc=com"
           roomids:
             - "!MShKAzDGwDFdyApLIR:example.com"
+            - "!ApLIRzDGMShKAywDFd:example.com"
 ```
 
 ## Credits
