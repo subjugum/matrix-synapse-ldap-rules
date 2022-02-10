@@ -253,7 +253,7 @@ class LdapRules:
         Returns False
             if join or invite failed
         """
-        joined = True
+        joined = False
 
         try:
             await self.api_handler.update_room_membership(
@@ -270,12 +270,11 @@ class LdapRules:
                     roomid,
                     "join"
                 )
+            joined = True
         except RuntimeError as e:
             logger.info("Inviter '%s' not a local user?\n%s", sender, e)
-            joined = False
         except ShadowBanError:
             logger.info("Inviter '%s' is shadowbanned", sender)
-            joined = False
         except SynapseError as e:
             logger.exception(
                 "Error occured when trying to join '%s' into '%s': %s",
@@ -283,7 +282,6 @@ class LdapRules:
                 roomid,
                 e
             )
-            joined = False
 
         if joined:
             logger.info("Joined user '%s' into room '%s'", target, roomid)
