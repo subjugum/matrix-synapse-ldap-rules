@@ -48,15 +48,13 @@ class LdapRules:
 
     def __init__(self, config: _Config, api: ModuleApi):
         self.api_handler: ModuleApi = api
-        min_version = "1.46.0"  # Introduces ModuleApi.update_room_membership
+        synapse_min_version = "1.46.0"  # Introduces ModuleApi.update_room_membership
 
-        if parse_version(synapse.__version__) < parse_version(min_version):
-            logger.error(
-                "Running Synapse version %s, %s required.",
-                synapse.__version__,
-                min_version
+        if parse_version(synapse.__version__) < parse_version(synapse_min_version):
+            raise Exception(
+                "Running Synapse version %s, %s required."
+                .format(synapse.__version__, synapse_min_version)
             )
-            raise RuntimeError
 
         self.ldap_uris = [config.uri] if isinstance(
             config.uri, str) else config.uri
@@ -190,59 +188,54 @@ class LdapRules:
         Returns False
             if username was not found in group or bind failed
         """
-        try:
-            server = self._get_server()
-            query = self.ldap_filter.format(
-                username=username,
-                group=ldap_group
-            )
+        server = self._get_server()
+        query = self.ldap_filter.format(
+            username=username,
+            group=ldap_group
+        )
 
-            result, conn = await self._ldap_simple_bind(
-                server=server,
-                bind_dn=self.ldap_bind_dn,
-                password=self.ldap_bind_password,
-            )
+        result, conn = await self._ldap_simple_bind(
+            server=server,
+            bind_dn=self.ldap_bind_dn,
+            password=self.ldap_bind_password,
+        )
 
-            if not result:
-                return False
+        if not result:
+            return False
 
-            await threads.deferToThread(
-                conn.search,
-                search_base=ldap_base,
-                search_filter=query,
-            )
+        await threads.deferToThread(
+            conn.search,
+            search_base=ldap_base,
+            search_filter=query,
+        )
 
-            responses = [
-                response
-                for response in conn.response
-                if response["type"] == "searchResEntry"
-            ]
+        responses = [
+            response
+            for response in conn.response
+            if response["type"] == "searchResEntry"
+        ]
 
-            if len(responses) == 1:
-                # GOOD: found exactly one result
+        if len(responses) == 1:
+            # GOOD: found exactly one result
+            logger.info(
+                "LDAP search found match for user '%s' in group '%s'", username, ldap_group)
+            await threads.deferToThread(conn.unbind)
+
+            return True
+        else:
+            # BAD: found 0 or >1 results, complain loudly to your LDAP admin in case of the latter
+            if len(responses) == 0:
                 logger.info(
-                    "LDAP search found match for user '%s' in group '%s'", username, ldap_group)
-                await threads.deferToThread(conn.unbind)
-
-                return True
+                    "LDAP search returned no results for '%s' in group '%s'", username, ldap_group)
             else:
-                # BAD: found 0 or >1 results, complain loudly to your LDAP admin in case of the latter
-                if len(responses) == 0:
-                    logger.info(
-                        "LDAP search returned no results for '%s' in group '%s'", username, ldap_group)
-                else:
-                    logger.info(
-                        "LDAP search returned too many (%s) results for '%s'",
-                        len(responses),
-                        query,
-                    )
+                logger.info(
+                    "LDAP search returned too many (%s) results for '%s'",
+                    len(responses),
+                    query,
+                )
 
-                await threads.deferToThread(conn.unbind)
-                return False
-
-        except ldap3.core.exceptions.LDAPException as e:
-            logger.warning("Error during LDAP authentication: %s", e)
-            raise
+            await threads.deferToThread(conn.unbind)
+            return False
 
     async def _join_to_room(
         self, sender:str, target: str, roomid: str, invite: Optional[bool] = False
@@ -250,28 +243,26 @@ class LdapRules:
         """Tries to force-join a user into a room.
 
         Args:
-            sender: Inviters mxid, must be local user
-            target: Invitees mxid
-            roomid: The roomid to join. Probably works for room alias?
-            invite: If True, invites user as inviter instead
+            sender: Inviters mxid, must be local
+            target: Invitees mxid, must be local
+            roomid: The roomid to join
+            invite: If True, only invite
 
         Returns True
             if join or invite was successful
         Returns False
             if join or invite failed
         """
-        joined = True
-        # FIXME: Spec says that invite state must come before join state
-        # Thus always invite before join
+        joined = False
 
         try:
-            # If membership_event == "join" then inviter == target must be True
             await self.api_handler.update_room_membership(
                 sender,
                 target,
                 roomid,
                 "invite"
             )
+            # Only the user themself can join a room
             if not invite:
                 await self.api_handler.update_room_membership(
                     target,
@@ -279,12 +270,11 @@ class LdapRules:
                     roomid,
                     "join"
                 )
+            joined = True
         except RuntimeError as e:
-            logger.info("Inviter '%s' not a local user?\n", sender, e)
-            joined = False
+            logger.info("Inviter '%s' not a local user?\n%s", sender, e)
         except ShadowBanError:
             logger.info("Inviter '%s' is shadowbanned", sender)
-            joined = False
         except SynapseError as e:
             logger.exception(
                 "Error occured when trying to join '%s' into '%s': %s",
@@ -292,14 +282,13 @@ class LdapRules:
                 roomid,
                 e
             )
-            joined = False
 
         if joined:
             logger.info("Joined user '%s' into room '%s'", target, roomid)
         return joined
 
     async def on_register(self, username: str):
-        # username will be fully qualified from callback
+        # username from callback will be fully qualified
         localpart = username.split(":", 1)[0][1:]
         logging.debug("'%s' just got registered, localpart '%s'",
                       username, localpart)

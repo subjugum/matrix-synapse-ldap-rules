@@ -2,7 +2,7 @@
 **WIP, do not use for prod unless you audited this.**
 **You will most likely have to rework the LDAP queries to fit your environment. See Configuration section below.**
 
-Synapse module for various rules depending on LDAP attributes. Currently only for joining rooms based on group membership.
+Synapse module for various rules depending on LDAP attributes. Currently only for joining rooms based on group membership on registration.
 
 This is intended to be used with an auth module which uses the same LDAP backend as this module, but will work just as well with any other registration method that triggers Synapses `on_user_registration` callback.
 Note that if you allow normal registration alongside this, normal registration users with names found in LDAP will be matched too.
@@ -10,6 +10,7 @@ Note that if you allow normal registration alongside this, normal registration u
 The module should be easily extendable to provide [matrix-corporal](https://github.com/devture/matrix-corporal) with policies.
 
 ## Installation
+**This module requires at least Synapse 1.46.0.**
 Install the module somewhere your Synapse can find it. For the Debian package you will probably want this:
 ```bash
 source /opt/venvs/matrix-synapse/bin/activate
@@ -18,8 +19,8 @@ deactivate
 ```
 
 ## Configuration
-`config.inviter` will try to join the user into the room by default.
-If you want to have the user invited instead, set `config.room_mapping.<group>.invite: true`.
+`config.inviter` will try to join the newly registered user into the room by default.
+If you only want to have the user invited instead, set `config.room_mapping.<group>.invite: true`.
 Both inviter and invite settings might be changed to be configurable per room, instead of per group in the future.
 
 `config.inviter` **must** be based on your homeserver and be able to invite people into the configured room.
