@@ -238,7 +238,7 @@ class LdapRules:
             return False
 
     async def _join_to_room(
-        self, sender:str, target: str, roomid: str, invite: Optional[bool] = False
+        self, sender: str, target: str, roomid: str, invite: Optional[bool] = False
     ) -> bool:
         """Tries to force-join a user into a room.
 
