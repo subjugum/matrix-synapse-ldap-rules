@@ -26,7 +26,7 @@ from synapse.api.errors import SynapseError, ShadowBanError
 from synapse.module_api import ModuleApi
 from twisted.internet import threads
 
-__version__ = "0.0.1"
+__version__ = "0.0.2"
 
 logger = logging.getLogger(__name__)
 
@@ -172,13 +172,16 @@ class LdapRules:
             logger.warning("Error during LDAP authentication: %s", e)
             raise
 
-    async def _check_membership(self, username: str, ldap_group: str, ldap_base: str) -> bool:
+    async def _check_membership(
+        self, conn: ldap3.Connection, username: str, ldap_group: str, ldap_base: str
+    ) -> bool:
         """Checks whether a group contains a user. This could technically be
         any property of the group. We provide group properties that resolve to
         users, because OpenLDAP does not support LDAP_MATCHING_RULE_IN_CHAIN.
         You will most likely have to modify this for your installation.
 
         Args:
+            conn: LDAP connection object
             username: The users login.
             ldap_group: LDAP group to check for username.
             ldap_base: LDAP base of group
@@ -186,22 +189,12 @@ class LdapRules:
         Returns True
             if username was found in group
         Returns False
-            if username was not found in group or bind failed
+            if username was not found in group
         """
-        server = self._get_server()
         query = self.ldap_filter.format(
             username=username,
             group=ldap_group
         )
-
-        result, conn = await self._ldap_simple_bind(
-            server=server,
-            bind_dn=self.ldap_bind_dn,
-            password=self.ldap_bind_password,
-        )
-
-        if not result:
-            return False
 
         await threads.deferToThread(
             conn.search,
@@ -219,8 +212,6 @@ class LdapRules:
             # GOOD: found exactly one result
             logger.info(
                 "LDAP search found match for user '%s' in group '%s'", username, ldap_group)
-            await threads.deferToThread(conn.unbind)
-
             return True
         else:
             # BAD: found 0 or >1 results, complain loudly to your LDAP admin in case of the latter
@@ -233,8 +224,6 @@ class LdapRules:
                     len(responses),
                     query,
                 )
-
-            await threads.deferToThread(conn.unbind)
             return False
 
     async def _join_to_room(
@@ -256,6 +245,7 @@ class LdapRules:
         joined = False
 
         try:
+            # https://spec.matrix.org/v1.2/client-server-api/#room-membership
             await self.api_handler.update_room_membership(
                 sender,
                 target,
@@ -288,6 +278,17 @@ class LdapRules:
         return joined
 
     async def on_register(self, username: str):
+        server = self._get_server()
+        result, conn = await self._ldap_simple_bind(
+            server=server,
+            bind_dn=self.ldap_bind_dn,
+            password=self.ldap_bind_password,
+        )
+        # Connection failed, bind function should throw an exception regardless
+        if not result:
+            logging.warning("LDAP bind failed, can't process user '%s'", username)
+            return
+
         # username from callback will be fully qualified
         localpart = username.split(":", 1)[0][1:]
         logging.debug("'%s' just got registered, localpart '%s'",
@@ -306,7 +307,7 @@ class LdapRules:
                 localpart,
             )
             # Check whether user is in group ...
-            if await self._check_membership(localpart, group, base):
+            if await self._check_membership(conn, localpart, group, base):
                 logging.debug(
                     "User '%s' found in group '%s', rooms to join: %s",
                     localpart,
@@ -318,6 +319,8 @@ class LdapRules:
                 for roomid in roomids:
                     # Finally join or invite user to room
                     await self._join_to_room(self.inviter, username, roomid, invite)
+        # Destroy LDAP connection after we're done
+        await threads.deferToThread(conn.unbind)
 
 
 def _require_keys(config: Dict[str, Any], required: Iterable[str]) -> None:
