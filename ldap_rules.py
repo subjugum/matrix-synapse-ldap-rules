@@ -21,12 +21,12 @@ from typing import Any, Dict, Iterable, List, Optional, Tuple, Union
 import ldap3
 import ldap3.core.exceptions
 import synapse
-from pkg_resources import parse_version
+from packaging.version import parse as parse_version
 from synapse.api.errors import SynapseError, ShadowBanError
 from synapse.module_api import ModuleApi
 from twisted.internet import threads
 
-__version__ = "0.0.2"
+__version__ = "0.0.3"
 
 logger = logging.getLogger(__name__)
 
@@ -52,12 +52,12 @@ class LdapRules:
 
         if parse_version(synapse.__version__) < parse_version(synapse_min_version):
             raise Exception(
-                "Running Synapse version %s, %s required."
-                .format(synapse.__version__, synapse_min_version)
+                "Running Synapse version %s, %s required.".format(
+                    synapse.__version__, synapse_min_version
+                )
             )
 
-        self.ldap_uris = [config.uri] if isinstance(
-            config.uri, str) else config.uri
+        self.ldap_uris = [config.uri] if isinstance(config.uri, str) else config.uri
         self.ldap_start_tls = config.start_tls
         self.ldap_bind_dn = config.bind_dn
         self.ldap_bind_password = config.bind_password
@@ -66,9 +66,7 @@ class LdapRules:
         self.room_mapping = config.room_mapping
 
         # module-callback for Synapse
-        api.register_account_validity_callbacks(
-            on_user_registration=self.on_register
-        )
+        api.register_account_validity_callbacks(on_user_registration=self.on_register)
 
     @staticmethod
     def parse_config(config) -> _Config:
@@ -142,15 +140,13 @@ class LdapRules:
                 authentication=ldap3.SIMPLE,
                 read_only=True,
             )
-            logger.debug(
-                "Established LDAP connection in simple bind mode: %s", conn)
+            logger.debug("Established LDAP connection in simple bind mode: %s", conn)
 
             if self.ldap_start_tls:
                 await threads.deferToThread(conn.open)
                 await threads.deferToThread(conn.start_tls)
                 logger.debug(
-                    "Upgraded LDAP connection in simple bind mode through "
-                    "StartTLS: %s",
+                    "Upgraded LDAP connection in simple bind mode through StartTLS: %s",
                     conn,
                 )
 
@@ -191,10 +187,7 @@ class LdapRules:
         Returns False
             if username was not found in group
         """
-        query = self.ldap_filter.format(
-            username=username,
-            group=ldap_group
-        )
+        query = self.ldap_filter.format(username=username, group=ldap_group)
 
         await threads.deferToThread(
             conn.search,
@@ -211,13 +204,19 @@ class LdapRules:
         if len(responses) == 1:
             # GOOD: found exactly one result
             logger.info(
-                "LDAP search found match for user '%s' in group '%s'", username, ldap_group)
+                "LDAP search found match for user '%s' in group '%s'",
+                username,
+                ldap_group,
+            )
             return True
         else:
             # BAD: found 0 or >1 results, complain loudly to your LDAP admin in case of the latter
             if len(responses) == 0:
                 logger.info(
-                    "LDAP search returned no results for '%s' in group '%s'", username, ldap_group)
+                    "LDAP search returned no results for '%s' in group '%s'",
+                    username,
+                    ldap_group,
+                )
             else:
                 logger.info(
                     "LDAP search returned too many (%s) results for '%s'",
@@ -247,18 +246,12 @@ class LdapRules:
         try:
             # https://spec.matrix.org/v1.2/client-server-api/#room-membership
             await self.api_handler.update_room_membership(
-                sender,
-                target,
-                roomid,
-                "invite"
+                sender, target, roomid, "invite"
             )
             # Only the user themself can join a room
             if not invite:
                 await self.api_handler.update_room_membership(
-                    target,
-                    target,
-                    roomid,
-                    "join"
+                    target, target, roomid, "join"
                 )
             joined = True
         except RuntimeError as e:
@@ -270,7 +263,7 @@ class LdapRules:
                 "Error occured when trying to join '%s' into '%s': %s",
                 target,
                 roomid,
-                e
+                e,
             )
 
         if joined:
@@ -291,8 +284,7 @@ class LdapRules:
 
         # username from callback will be fully qualified
         localpart = username.split(":", 1)[0][1:]
-        logging.debug("'%s' just got registered, localpart '%s'",
-                      username, localpart)
+        logging.debug("'%s' just got registered, localpart '%s'", username, localpart)
 
         for group, mapping in self.room_mapping.items():
             base = mapping["base"]
