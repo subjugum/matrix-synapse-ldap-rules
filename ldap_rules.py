@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-# Copyright 2022 Johannes H.
+# Copyright 2026 Johannes H.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -52,9 +52,7 @@ class LdapRules:
 
         if parse_version(synapse.__version__) < parse_version(synapse_min_version):
             raise Exception(
-                "Running Synapse version %s, %s required.".format(
-                    synapse.__version__, synapse_min_version
-                )
+                f"Running Synapse version {synapse.__version__}, {synapse_min_version} required."
             )
 
         self.ldap_uris = [config.uri] if isinstance(config.uri, str) else config.uri
@@ -140,14 +138,13 @@ class LdapRules:
                 authentication=ldap3.SIMPLE,
                 read_only=True,
             )
-            logger.debug("Established LDAP connection in simple bind mode: %s", conn)
+            logger.debug(f"Established LDAP connection in simple bind mode: {conn}")
 
             if self.ldap_start_tls:
                 await threads.deferToThread(conn.open)
                 await threads.deferToThread(conn.start_tls)
                 logger.debug(
-                    "Upgraded LDAP connection in simple bind mode through StartTLS: %s",
-                    conn,
+                    f"Upgraded LDAP connection in simple bind mode through StartTLS: {conn}"
                 )
 
             if await threads.deferToThread(conn.bind):
@@ -157,15 +154,13 @@ class LdapRules:
 
             # BAD: bind failed
             logger.info(
-                "Binding against LDAP failed for '%s' failed: %s",
-                bind_dn,
-                conn.result["description"],
+                f"Binding against LDAP failed for '{bind_dn}' failed: {conn.result['description']}"
             )
             await threads.deferToThread(conn.unbind)
             return (False, None)
 
         except ldap3.core.exceptions.LDAPException as e:
-            logger.warning("Error during LDAP authentication: %s", e)
+            logger.warning(f"Error during LDAP authentication: {e}")
             raise
 
     async def _check_membership(
@@ -204,24 +199,18 @@ class LdapRules:
         if len(responses) == 1:
             # GOOD: found exactly one result
             logger.info(
-                "LDAP search found match for user '%s' in group '%s'",
-                username,
-                ldap_group,
+                f"LDAP search found match for user '{username}' in group '{ldap_group}'"
             )
             return True
         else:
             # BAD: found 0 or >1 results, complain loudly to your LDAP admin in case of the latter
             if len(responses) == 0:
                 logger.info(
-                    "LDAP search returned no results for '%s' in group '%s'",
-                    username,
-                    ldap_group,
+                    f"LDAP search returned no results for '{username}' in group '{ldap_group}'"
                 )
             else:
                 logger.info(
-                    "LDAP search returned too many (%s) results for '%s'",
-                    len(responses),
-                    query,
+                    f"LDAP search returned too many ({len(responses)}) results for '{query}'"
                 )
             return False
 
@@ -255,19 +244,16 @@ class LdapRules:
                 )
             joined = True
         except RuntimeError as e:
-            logger.info("Inviter '%s' not a local user?\n%s", sender, e)
+            logger.info(f"Inviter '{sender}' not a local user?\n{e}")
         except ShadowBanError:
-            logger.info("Inviter '%s' is shadowbanned", sender)
+            logger.info(f"Inviter '{sender}' is shadowbanned")
         except SynapseError as e:
             logger.exception(
-                "Error occured when trying to join '%s' into '%s': %s",
-                target,
-                roomid,
-                e,
+                f"Error occured when trying to join '{target}' into '{roomid}': {e}"
             )
 
         if joined:
-            logger.info("Joined user '%s' into room '%s'", target, roomid)
+            logger.info(f"Joined user '{target}' into room '{roomid}'")
         return joined
 
     async def on_register(self, username: str):
@@ -279,12 +265,12 @@ class LdapRules:
         )
         # Connection failed, bind function should throw an exception regardless
         if not result:
-            logging.warning("LDAP bind failed, can't process user '%s'", username)
+            logging.warning(f"LDAP bind failed, can't process user '{username}'")
             return
 
         # username from callback will be fully qualified
         localpart = username.split(":", 1)[0][1:]
-        logging.debug("'%s' just got registered, localpart '%s'", username, localpart)
+        logging.debug(f"'{username}' just got registered, localpart '{localpart}'")
 
         for group, mapping in self.room_mapping.items():
             base = mapping["base"]
@@ -292,19 +278,12 @@ class LdapRules:
             roomids = mapping["roomids"]
 
             logging.debug(
-                "Entering room_mapping for group '%s', base '%s' and "
-                "check whether '%s' exists in group",
-                group,
-                base,
-                localpart,
+                f"Entering room_mapping for group '{group}', base '{base}' and check whether '{localpart}' exists in group"
             )
             # Check whether user is in group ...
             if await self._check_membership(conn, localpart, group, base):
                 logging.debug(
-                    "User '%s' found in group '%s', rooms to join: %s",
-                    localpart,
-                    group,
-                    roomids,
+                    f"User '{localpart}' found in group '{group}', rooms to join: {roomids}"
                 )
 
                 # ... on success we can iterate through rooms to join

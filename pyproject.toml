@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=39.2.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ldap_rules"
+authors = [
+    {name = "Johannes Hoffmann"},
+]
+description = "Synapse module for various rules depending on LDAP attributes"
+classifiers = [
+    "Development Status :: 3 - Beta",
+    "License :: OSI Approved :: Apache Software License",
+    "Programming Language :: Python :: 3 :: Only"
+]
+dynamic = ["version"]
+requires-python = ">=3.10"
+dependencies = [
+    "Twisted>=15.1.0",
+    "matrix-synapse",
+    "ldap3>=2.8",
+    "packaging>=14.1"
+]
+
+[tool.setuptools.dynamic]
+version = {attr = "ldap_rules.__version__"}
